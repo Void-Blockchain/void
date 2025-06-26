@@ -17,7 +17,7 @@ require (
 	cosmossdk.io/x/feegrant v0.2.0
 	cosmossdk.io/x/tx v0.14.0
 	cosmossdk.io/x/upgrade v0.2.0
-	github.com/CosmWasm/wasmd v0.55.0-ibc2.0
+	github.com/CosmWasm/wasmd v0.61.0
 	github.com/cometbft/cometbft v0.38.17
 	github.com/cosmos/cosmos-db v1.1.3
 	github.com/cosmos/cosmos-sdk v0.53.2
@@ -232,7 +232,7 @@ require (
 
 replace (
 	//
-	github.com/CosmWasm/wasmd => github.com/CosmWasm/wasmd v0.55.1-0.20250623144802-8c478205b209
+	// github.com/CosmWasm/wasmd => github.com/CosmWasm/wasmd v0.55.1-0.20250623144802-8c478205b209
 	// Fix upstream GHSA-h395-qcrw-5vmq and GHSA-3vp4-m3rf-835h vulnerabilities.
 	github.com/gin-gonic/gin => github.com/gin-gonic/gin v1.9.1
 	// replace broken goleveldb
