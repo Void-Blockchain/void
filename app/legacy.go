@@ -170,14 +170,14 @@ func (app *VoidApp) RegisterLegacyModules(appOpts servertypes.AppOptions) error 
 
 	// Create Transfer Stack
 	transferStack = ibctransfer.NewIBCModule(app.IBCTransferKeeper)
-	transferStack = ibccallbacks.NewIBCMiddleware(transferStack, app.IBCKeeper.ChannelKeeper, wasmStackIBCHandler, wasm.DefaultMaxIBCCallbackGas)
+	cbStack := ibccallbacks.NewIBCMiddleware(transferStack, app.IBCKeeper.ChannelKeeper, wasmStackIBCHandler, wasm.DefaultMaxIBCCallbackGas)
 	transferStack = fpm.NewIBCMiddleware(
-		transferStack,
+		cbStack,
 		app.PFMKeeper,
 		0, // retries on timeout
 		fpmkeeper.DefaultForwardTransferPacketTimeoutTimestamp,
 	)
-	transferICS4Wrapper := transferStack.(porttypes.ICS4Wrapper)
+	var transferICS4Wrapper porttypes.ICS4Wrapper = cbStack
 	// Since the callbacks middleware itself is an ics4wrapper, it needs to be passed to the ica controller keeper
 	app.IBCTransferKeeper.WithICS4Wrapper(transferICS4Wrapper)
 
