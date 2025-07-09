@@ -52,6 +52,7 @@ import (
 	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
+	fpmtypes "github.com/cosmos/ibc-apps/middleware/packet-forward-middleware/v10/packetforward/types"
 	icatypes "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/types"
 	ibctransfertypes "github.com/cosmos/ibc-go/v10/modules/apps/transfer/types"
 	ibcexported "github.com/cosmos/ibc-go/v10/modules/core/exported"
@@ -132,6 +133,7 @@ var (
 					authz.ModuleName,
 					// ibc modules
 					ibcexported.ModuleName,
+					fpmtypes.ModuleName,
 					ibctransfertypes.ModuleName,
 					icatypes.ModuleName,
 					// wasm modules
@@ -146,6 +148,7 @@ var (
 					protocolpooltypes.ModuleName,
 					// ibc modules
 					ibcexported.ModuleName,
+					fpmtypes.ModuleName,
 					ibctransfertypes.ModuleName,
 					icatypes.ModuleName,
 					// wasm modules
@@ -184,6 +187,7 @@ var (
 					// ibc
 					ibcexported.ModuleName,
 					ibctransfertypes.ModuleName,
+					fpmtypes.ModuleName,
 					icatypes.ModuleName,
 					// wasm
 					wasmtypes.ModuleName,
@@ -214,6 +218,7 @@ var (
 					// ibc
 					ibcexported.ModuleName,
 					ibctransfertypes.ModuleName,
+					fpmtypes.ModuleName,
 					icatypes.ModuleName,
 					// wasm
 					wasmtypes.ModuleName,

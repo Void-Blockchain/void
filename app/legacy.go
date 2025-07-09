@@ -15,7 +15,10 @@ import (
 	distrkeeper "github.com/cosmos/cosmos-sdk/x/distribution/keeper"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
 	paramstypes "github.com/cosmos/cosmos-sdk/x/params/types"
-	icamodule "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts"
+	fpm "github.com/cosmos/ibc-apps/middleware/packet-forward-middleware/v10/packetforward"
+	fpmkeeper "github.com/cosmos/ibc-apps/middleware/packet-forward-middleware/v10/packetforward/keeper"
+	fpmtypes "github.com/cosmos/ibc-apps/middleware/packet-forward-middleware/v10/packetforward/types"
+	ica "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts"
 	icacontroller "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/controller"
 	icacontrollerkeeper "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/controller/keeper"
 	icacontrollertypes "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/controller/types"
@@ -53,6 +56,7 @@ func (app *VoidApp) RegisterLegacyModules(appOpts servertypes.AppOptions) error 
 		storetypes.NewKVStoreKey(ibctransfertypes.StoreKey),
 		storetypes.NewKVStoreKey(icahosttypes.StoreKey),
 		storetypes.NewKVStoreKey(icacontrollertypes.StoreKey),
+		storetypes.NewKVStoreKey(fpmtypes.StoreKey),
 		storetypes.NewKVStoreKey(wasmtypes.StoreKey),
 	); err != nil {
 		return err
@@ -113,6 +117,17 @@ func (app *VoidApp) RegisterLegacyModules(appOpts servertypes.AppOptions) error 
 		govModuleAddr,
 	)
 
+	// Packet Forward Middleware keeper
+	app.PFMKeeper = fpmkeeper.NewKeeper(
+		app.appCodec,
+		runtime.NewKVStoreService(app.GetKey(fpmtypes.StoreKey)),
+		app.IBCTransferKeeper,
+		app.IBCKeeper.ChannelKeeper,
+		app.BankKeeper,
+		app.IBCKeeper.ChannelKeeper,
+		govModuleAddr,
+	)
+
 	// Wasm Module
 	wasmConfig, err := wasm.ReadNodeConfig(appOpts)
 	if err != nil {
@@ -153,6 +168,19 @@ func (app *VoidApp) RegisterLegacyModules(appOpts servertypes.AppOptions) error 
 	// create wasm stack
 	wasmStackIBCHandler = wasm.NewIBCHandler(app.WasmKeeper, app.IBCKeeper.ChannelKeeper, app.IBCTransferKeeper, app.IBCKeeper.ChannelKeeper)
 
+	// Create Transfer Stack
+	transferStack = ibctransfer.NewIBCModule(app.IBCTransferKeeper)
+	transferStack = ibccallbacks.NewIBCMiddleware(transferStack, app.IBCKeeper.ChannelKeeper, wasmStackIBCHandler, wasm.DefaultMaxIBCCallbackGas)
+	transferStack = fpm.NewIBCMiddleware(
+		transferStack,
+		app.PFMKeeper,
+		0, // retries on timeout
+		fpmkeeper.DefaultForwardTransferPacketTimeoutTimestamp,
+	)
+	transferICS4Wrapper := transferStack.(porttypes.ICS4Wrapper)
+	// Since the callbacks middleware itself is an ics4wrapper, it needs to be passed to the ica controller keeper
+	app.IBCTransferKeeper.WithICS4Wrapper(transferICS4Wrapper)
+
 	// Create Interchain Accounts Stack
 	icaControllerStack = icacontroller.NewIBCMiddlewareWithAuth(noAuthzModule, app.ICAControllerKeeper)
 	icaControllerStack = icacontroller.NewIBCMiddlewareWithAuth(icaControllerStack, app.ICAControllerKeeper)
@@ -161,14 +189,9 @@ func (app *VoidApp) RegisterLegacyModules(appOpts servertypes.AppOptions) error 
 	// Since the callbacks middleware itself is an ics4wrapper, it needs to be passed to the ica controller keeper
 	app.ICAControllerKeeper.WithICS4Wrapper(icaICS4Wrapper)
 
+	// RecvPacket, message that originates from core IBC and goes down to app, the flow is:
+	// channel.RecvPacket -> icaHost.OnRecvPacket
 	icaHostStack = icahost.NewIBCModule(app.ICAHostKeeper)
-
-	// Create Transfer Stack
-	transferStack = ibctransfer.NewIBCModule(app.IBCTransferKeeper)
-	transferStack = ibccallbacks.NewIBCMiddleware(transferStack, app.IBCKeeper.ChannelKeeper, wasmStackIBCHandler, wasm.DefaultMaxIBCCallbackGas)
-	transferICS4Wrapper := transferStack.(porttypes.ICS4Wrapper)
-	// Since the callbacks middleware itself is an ics4wrapper, it needs to be passed to the ica controller keeper
-	app.IBCTransferKeeper.WithICS4Wrapper(transferICS4Wrapper)
 
 	// set denom resolver to test variant.
 	app.FeeMarketKeeper.SetDenomResolver(&feemarkettypes.TestDenomResolver{})
@@ -200,7 +223,7 @@ func (app *VoidApp) RegisterLegacyModules(appOpts servertypes.AppOptions) error 
 
 	// register legacy modules
 	if err := app.RegisterModules(
-		// register WASM modules
+		// WASM modules
 		wasm.NewAppModule(
 			app.AppCodec(),
 			&app.WasmKeeper,
@@ -210,10 +233,13 @@ func (app *VoidApp) RegisterLegacyModules(appOpts servertypes.AppOptions) error 
 			app.MsgServiceRouter(),
 			app.GetSubspace(wasmtypes.ModuleName),
 		),
-		// register IBC modules
+		// IBC modules
 		ibc.NewAppModule(app.IBCKeeper),
 		ibctransfer.NewAppModule(app.IBCTransferKeeper),
-		icamodule.NewAppModule(&app.ICAControllerKeeper, &app.ICAHostKeeper),
+		ica.NewAppModule(&app.ICAControllerKeeper, &app.ICAHostKeeper),
+		fpm.NewAppModule(app.PFMKeeper, app.GetSubspace(fpmtypes.ModuleName)),
+
+		// IBC lightclient
 		ibctm.NewAppModule(tmLightClientModule),
 		solomachine.NewAppModule(soloLightClientModule),
 	); err != nil {
@@ -248,7 +274,7 @@ func RegisterLegacyCLI(cdc codec.Codec) map[string]appmodule.AppModule {
 	modules := map[string]appmodule.AppModule{
 		ibcexported.ModuleName:      ibc.NewAppModule(&ibckeeper.Keeper{}),
 		ibctransfertypes.ModuleName: ibctransfer.NewAppModule(ibctransferkeeper.Keeper{}),
-		icatypes.ModuleName:         icamodule.NewAppModule(&icacontrollerkeeper.Keeper{}, &icahostkeeper.Keeper{}),
+		icatypes.ModuleName:         ica.NewAppModule(&icacontrollerkeeper.Keeper{}, &icahostkeeper.Keeper{}),
 		ibctm.ModuleName:            ibctm.NewAppModule(ibctm.NewLightClientModule(cdc, ibcclienttypes.StoreProvider{})),
 		solomachine.ModuleName:      solomachine.NewAppModule(solomachine.NewLightClientModule(cdc, ibcclienttypes.StoreProvider{})),
 		wasmtypes.ModuleName:        wasm.AppModule{},
