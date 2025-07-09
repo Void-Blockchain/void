@@ -34,6 +34,8 @@ require (
 	google.golang.org/protobuf v1.36.6
 )
 
+require github.com/cosmos/ibc-apps/modules/rate-limiting/v10 v10.1.0
+
 require (
 	cel.dev/expr v0.20.0 // indirect
 	cloud.google.com/go v0.116.0 // indirect

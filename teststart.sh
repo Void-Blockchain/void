@@ -49,6 +49,7 @@ jq --arg base "$DENOM" --arg disp "${DENOM#u}" '
 
 echo "👤 Generate key & add genesis account..."
 $BINARY keys add validator --home "$CHAIN_HOME"
+echo "Add genesis account..."
 $BINARY genesis add-genesis-account validator 100000000000uvoid --home "$CHAIN_HOME"
 
 echo "📝 Generate gentx..."

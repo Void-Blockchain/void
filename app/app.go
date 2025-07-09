@@ -47,7 +47,8 @@ import (
 
 	abci "github.com/cometbft/cometbft/abci/types"
 
-	fpmkeeper "github.com/cosmos/ibc-apps/middleware/packet-forward-middleware/v10/packetforward/keeper"
+	pfmkeeper "github.com/cosmos/ibc-apps/middleware/packet-forward-middleware/v10/packetforward/keeper"
+	ratelimitkeeper "github.com/cosmos/ibc-apps/modules/rate-limiting/v10/keeper"
 	icacontrollerkeeper "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/controller/keeper"
 	icahostkeeper "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/host/keeper"
 	ibctransferkeeper "github.com/cosmos/ibc-go/v10/modules/apps/transfer/keeper"
@@ -109,7 +110,8 @@ type VoidApp struct {
 	ICAControllerKeeper icacontrollerkeeper.Keeper
 	ICAHostKeeper       icahostkeeper.Keeper
 	IBCTransferKeeper   ibctransferkeeper.Keeper
-	PFMKeeper           *fpmkeeper.Keeper
+	PFMKeeper           *pfmkeeper.Keeper
+	RateLimitKeeper     ratelimitkeeper.Keeper
 
 	// CosmWasm
 	WasmKeeper wasmkeeper.Keeper

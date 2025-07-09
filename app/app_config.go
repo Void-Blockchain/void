@@ -53,6 +53,7 @@ import (
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
 	fpmtypes "github.com/cosmos/ibc-apps/middleware/packet-forward-middleware/v10/packetforward/types"
+	ratelimittypes "github.com/cosmos/ibc-apps/modules/rate-limiting/v10/types"
 	icatypes "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/types"
 	ibctransfertypes "github.com/cosmos/ibc-go/v10/modules/apps/transfer/types"
 	ibcexported "github.com/cosmos/ibc-go/v10/modules/core/exported"
@@ -136,6 +137,7 @@ var (
 					fpmtypes.ModuleName,
 					ibctransfertypes.ModuleName,
 					icatypes.ModuleName,
+					ratelimittypes.ModuleName,
 					// wasm modules
 					wasmtypes.ModuleName,
 				},
@@ -149,8 +151,9 @@ var (
 					// ibc modules
 					ibcexported.ModuleName,
 					fpmtypes.ModuleName,
-					ibctransfertypes.ModuleName,
+					ratelimittypes.ModuleName,
 					icatypes.ModuleName,
+					ratelimittypes.ModuleName,
 					// wasm modules
 					wasmtypes.ModuleName,
 				},
@@ -189,6 +192,7 @@ var (
 					ibctransfertypes.ModuleName,
 					fpmtypes.ModuleName,
 					icatypes.ModuleName,
+					ratelimittypes.ModuleName,
 					// wasm
 					wasmtypes.ModuleName,
 					// feemarket
@@ -220,6 +224,7 @@ var (
 					ibctransfertypes.ModuleName,
 					fpmtypes.ModuleName,
 					icatypes.ModuleName,
+					ratelimittypes.ModuleName,
 					// wasm
 					wasmtypes.ModuleName,
 					// feemarket

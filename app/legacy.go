@@ -15,9 +15,13 @@ import (
 	distrkeeper "github.com/cosmos/cosmos-sdk/x/distribution/keeper"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
 	paramstypes "github.com/cosmos/cosmos-sdk/x/params/types"
-	fpm "github.com/cosmos/ibc-apps/middleware/packet-forward-middleware/v10/packetforward"
-	fpmkeeper "github.com/cosmos/ibc-apps/middleware/packet-forward-middleware/v10/packetforward/keeper"
-	fpmtypes "github.com/cosmos/ibc-apps/middleware/packet-forward-middleware/v10/packetforward/types"
+	pfm "github.com/cosmos/ibc-apps/middleware/packet-forward-middleware/v10/packetforward"
+	pfmkeeper "github.com/cosmos/ibc-apps/middleware/packet-forward-middleware/v10/packetforward/keeper"
+	pfmtypes "github.com/cosmos/ibc-apps/middleware/packet-forward-middleware/v10/packetforward/types"
+	ratelimit "github.com/cosmos/ibc-apps/modules/rate-limiting/v10"
+	ratelimitkeeper "github.com/cosmos/ibc-apps/modules/rate-limiting/v10/keeper"
+	ratelimittypes "github.com/cosmos/ibc-apps/modules/rate-limiting/v10/types"
+	ratelimitv2 "github.com/cosmos/ibc-apps/modules/rate-limiting/v10/v2"
 	ica "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts"
 	icacontroller "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/controller"
 	icacontrollerkeeper "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/controller/keeper"
@@ -27,6 +31,7 @@ import (
 	icahosttypes "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/host/types"
 	icatypes "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/types"
 	ibccallbacks "github.com/cosmos/ibc-go/v10/modules/apps/callbacks"
+	ibccallbacksv2 "github.com/cosmos/ibc-go/v10/modules/apps/callbacks/v2"
 	ibctransfer "github.com/cosmos/ibc-go/v10/modules/apps/transfer"
 	ibctransferkeeper "github.com/cosmos/ibc-go/v10/modules/apps/transfer/keeper"
 	ibctransfertypes "github.com/cosmos/ibc-go/v10/modules/apps/transfer/types"
@@ -56,7 +61,8 @@ func (app *VoidApp) RegisterLegacyModules(appOpts servertypes.AppOptions) error 
 		storetypes.NewKVStoreKey(ibctransfertypes.StoreKey),
 		storetypes.NewKVStoreKey(icahosttypes.StoreKey),
 		storetypes.NewKVStoreKey(icacontrollertypes.StoreKey),
-		storetypes.NewKVStoreKey(fpmtypes.StoreKey),
+		storetypes.NewKVStoreKey(pfmtypes.StoreKey),
+		storetypes.NewKVStoreKey(ratelimittypes.StoreKey),
 		storetypes.NewKVStoreKey(wasmtypes.StoreKey),
 	); err != nil {
 		return err
@@ -69,6 +75,8 @@ func (app *VoidApp) RegisterLegacyModules(appOpts servertypes.AppOptions) error 
 	app.ParamsKeeper.Subspace(ibctransfertypes.ModuleName).WithKeyTable(ibctransfertypes.ParamKeyTable())
 	app.ParamsKeeper.Subspace(icacontrollertypes.SubModuleName).WithKeyTable(icacontrollertypes.ParamKeyTable())
 	app.ParamsKeeper.Subspace(icahosttypes.SubModuleName).WithKeyTable(icahosttypes.ParamKeyTable())
+	app.ParamsKeeper.Subspace(pfmtypes.ModuleName)
+	app.ParamsKeeper.Subspace(ratelimittypes.ModuleName).WithKeyTable(ratelimittypes.ParamKeyTable())
 
 	govModuleAddr, _ := app.AccountKeeper.AddressCodec().BytesToString(authtypes.NewModuleAddress(govtypes.ModuleName))
 
@@ -104,15 +112,27 @@ func (app *VoidApp) RegisterLegacyModules(appOpts servertypes.AppOptions) error 
 		govModuleAddr,
 	)
 
+	// Create RateLimit keeper
+	app.RateLimitKeeper = *ratelimitkeeper.NewKeeper(
+		app.appCodec,
+		runtime.NewKVStoreService(app.GetKey(ratelimittypes.StoreKey)),
+		app.GetSubspace(ratelimittypes.ModuleName),
+		govModuleAddr,
+		app.BankKeeper,
+		app.IBCKeeper.ChannelKeeper,
+		app.IBCKeeper.ClientKeeper,
+		app.IBCKeeper.ChannelKeeper,
+	)
+
 	// Packet Forward Middleware keeper
 	// PFMKeeper must be created before TransferKeeper
-	app.PFMKeeper = fpmkeeper.NewKeeper(
+	app.PFMKeeper = pfmkeeper.NewKeeper(
 		app.appCodec,
-		runtime.NewKVStoreService(app.GetKey(fpmtypes.StoreKey)),
+		runtime.NewKVStoreService(app.GetKey(pfmtypes.StoreKey)),
 		nil,
 		app.IBCKeeper.ChannelKeeper,
 		app.BankKeeper,
-		app.IBCKeeper.ChannelKeeper,
+		app.RateLimitKeeper, // ICS4Wrapper
 		govModuleAddr,
 	)
 
@@ -160,7 +180,6 @@ func (app *VoidApp) RegisterLegacyModules(appOpts servertypes.AppOptions) error 
 		wasmOpts...,
 	)
 
-	// create IBC module from bottom to top of stack
 	var (
 		wasmStackIBCHandler wasm.IBCHandler
 		icaControllerStack  porttypes.IBCModule
@@ -174,13 +193,14 @@ func (app *VoidApp) RegisterLegacyModules(appOpts servertypes.AppOptions) error 
 
 	// Create Transfer Stack
 	transferStack = ibctransfer.NewIBCModule(app.IBCTransferKeeper)
-	cbStack := ibccallbacks.NewIBCMiddleware(transferStack, app.IBCKeeper.ChannelKeeper, wasmStackIBCHandler, wasm.DefaultMaxIBCCallbackGas)
-	transferStack = fpm.NewIBCMiddleware(
+	cbStack := ibccallbacks.NewIBCMiddleware(transferStack, app.PFMKeeper, wasmStackIBCHandler, wasm.DefaultMaxIBCCallbackGas)
+	transferStack = pfm.NewIBCMiddleware(
 		cbStack,
 		app.PFMKeeper,
 		0, // retries on timeout
-		fpmkeeper.DefaultForwardTransferPacketTimeoutTimestamp,
+		pfmkeeper.DefaultForwardTransferPacketTimeoutTimestamp,
 	)
+	transferStack = ratelimit.NewIBCMiddleware(app.RateLimitKeeper, transferStack)
 	var transferICS4Wrapper porttypes.ICS4Wrapper = cbStack
 	// Since the callbacks middleware itself is an ics4wrapper, it needs to be passed to the ica controller keeper
 	app.IBCTransferKeeper.WithICS4Wrapper(transferICS4Wrapper)
@@ -200,19 +220,26 @@ func (app *VoidApp) RegisterLegacyModules(appOpts servertypes.AppOptions) error 
 	// set denom resolver to test variant.
 	app.FeeMarketKeeper.SetDenomResolver(&feemarkettypes.TestDenomResolver{})
 
-	// Create static IBC router, add transfer route, then set and seal it
+	// Create static IBC router
 	ibcRouter := porttypes.NewRouter().
 		AddRoute(ibctransfertypes.ModuleName, transferStack).
 		AddRoute(icacontrollertypes.SubModuleName, icaControllerStack).
 		AddRoute(icahosttypes.SubModuleName, icaHostStack).
 		AddRoute(wasmtypes.ModuleName, wasmStackIBCHandler)
 
-	// Set the IBC Routers
 	app.IBCKeeper.SetRouter(ibcRouter)
 
+	// IBCv2 transfer stack
+	var transferStackV2 ibcapi.IBCModule
+	transferStackV2 = ibctransferv2.NewIBCModule(app.IBCTransferKeeper)
+	transferStackV2 = ibccallbacksv2.NewIBCMiddleware(transferStackV2, app.IBCKeeper.ChannelKeeperV2,
+		wasmStackIBCHandler, app.IBCKeeper.ChannelKeeperV2, wasm.DefaultMaxIBCCallbackGas)
+	transferStackV2 = ratelimitv2.NewIBCMiddleware(app.RateLimitKeeper, transferStackV2)
+
+	// Create IBCv2 Router & seal
 	ibcRouterV2 := ibcapi.NewRouter()
 	ibcRouterV2 = ibcRouterV2.
-		AddRoute(ibctransfertypes.PortID, ibctransferv2.NewIBCModule(app.IBCTransferKeeper)).
+		AddRoute(ibctransfertypes.PortID, transferStackV2).
 		AddPrefixRoute(wasmkeeper.PortIDPrefixV2, wasmkeeper.NewIBC2Handler(app.WasmKeeper))
 	app.IBCKeeper.SetRouterV2(ibcRouterV2)
 
@@ -241,7 +268,8 @@ func (app *VoidApp) RegisterLegacyModules(appOpts servertypes.AppOptions) error 
 		ibc.NewAppModule(app.IBCKeeper),
 		ibctransfer.NewAppModule(app.IBCTransferKeeper),
 		ica.NewAppModule(&app.ICAControllerKeeper, &app.ICAHostKeeper),
-		fpm.NewAppModule(app.PFMKeeper, app.GetSubspace(fpmtypes.ModuleName)),
+		pfm.NewAppModule(app.PFMKeeper, app.GetSubspace(pfmtypes.ModuleName)),
+		ratelimit.NewAppModule(app.appCodec, app.RateLimitKeeper),
 
 		// IBC lightclient
 		ibctm.NewAppModule(tmLightClientModule),
@@ -276,12 +304,17 @@ func (app *VoidApp) RegisterLegacyModules(appOpts servertypes.AppOptions) error 
 // we need to manually register the modules on the client side.
 func RegisterLegacyCLI(cdc codec.Codec) map[string]appmodule.AppModule {
 	modules := map[string]appmodule.AppModule{
-		ibcexported.ModuleName:      ibc.NewAppModule(&ibckeeper.Keeper{}),
-		ibctransfertypes.ModuleName: ibctransfer.NewAppModule(ibctransferkeeper.Keeper{}),
-		icatypes.ModuleName:         ica.NewAppModule(&icacontrollerkeeper.Keeper{}, &icahostkeeper.Keeper{}),
-		ibctm.ModuleName:            ibctm.NewAppModule(ibctm.NewLightClientModule(cdc, ibcclienttypes.StoreProvider{})),
-		solomachine.ModuleName:      solomachine.NewAppModule(solomachine.NewLightClientModule(cdc, ibcclienttypes.StoreProvider{})),
-		wasmtypes.ModuleName:        wasm.AppModule{},
+		// ibc
+		ibcexported.ModuleName:      ibc.AppModule{},
+		ibctransfertypes.ModuleName: ibctransfer.AppModule{},
+		icatypes.ModuleName:         ica.AppModule{},
+		pfmtypes.ModuleName:         pfm.AppModule{},
+		ratelimittypes.ModuleName:   ratelimit.AppModule{},
+		// lightclient
+		ibctm.ModuleName:       ibctm.AppModule{},
+		solomachine.ModuleName: solomachine.AppModule{},
+		// wasm
+		wasmtypes.ModuleName: wasm.AppModule{},
 	}
 
 	for _, m := range modules {
