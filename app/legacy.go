@@ -81,19 +81,6 @@ func (app *VoidApp) RegisterLegacyModules(appOpts servertypes.AppOptions) error 
 		govModuleAddr,
 	)
 
-	// Create IBC transfer keeper
-	app.IBCTransferKeeper = ibctransferkeeper.NewKeeper(
-		app.appCodec,
-		runtime.NewKVStoreService(app.GetKey(ibctransfertypes.StoreKey)),
-		app.GetSubspace(ibctransfertypes.ModuleName),
-		app.IBCKeeper.ChannelKeeper,
-		app.IBCKeeper.ChannelKeeper,
-		app.MsgServiceRouter(),
-		app.AccountKeeper,
-		app.BankKeeper,
-		govModuleAddr,
-	)
-
 	// Create interchain account keepers
 	app.ICAHostKeeper = icahostkeeper.NewKeeper(
 		app.appCodec,
@@ -118,15 +105,32 @@ func (app *VoidApp) RegisterLegacyModules(appOpts servertypes.AppOptions) error 
 	)
 
 	// Packet Forward Middleware keeper
+	// PFMKeeper must be created before TransferKeeper
 	app.PFMKeeper = fpmkeeper.NewKeeper(
 		app.appCodec,
 		runtime.NewKVStoreService(app.GetKey(fpmtypes.StoreKey)),
-		app.IBCTransferKeeper,
+		nil,
 		app.IBCKeeper.ChannelKeeper,
 		app.BankKeeper,
 		app.IBCKeeper.ChannelKeeper,
 		govModuleAddr,
 	)
+
+	// Create IBC transfer keeper
+	app.IBCTransferKeeper = ibctransferkeeper.NewKeeper(
+		app.appCodec,
+		runtime.NewKVStoreService(app.GetKey(ibctransfertypes.StoreKey)),
+		app.GetSubspace(ibctransfertypes.ModuleName),
+		app.IBCKeeper.ChannelKeeper,
+		app.IBCKeeper.ChannelKeeper,
+		app.MsgServiceRouter(),
+		app.AccountKeeper,
+		app.BankKeeper,
+		govModuleAddr,
+	)
+
+	// Must be called on PFMRouter AFTER TransferKeeper initialized
+	app.PFMKeeper.SetTransferKeeper(app.IBCTransferKeeper)
 
 	// Wasm Module
 	wasmConfig, err := wasm.ReadNodeConfig(appOpts)
